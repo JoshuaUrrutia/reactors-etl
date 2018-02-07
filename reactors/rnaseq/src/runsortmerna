@@ -1,10 +1,11 @@
 #!/bin/bash
 
-set -e 
+set -e
 
-set +x 
+set +x
 # this is where we mount the binary directories
 
+FASTQC_DIR=/opt/fastqc-0.11.6/
 SORTMERNA_DIR=/opt/sortmerna-2.1b/
 TRIMMOMATIC_DIR=/opt/Trimmomatic-0.36/
 RNADB_CONFIG="config"
@@ -42,7 +43,7 @@ if [ ${7}x = x ]; then
    exit 1
 fi
 
-# get the parameters 1 to 6 ... someday do checking 
+# get the parameters 1 to 6 ... someday do checking
 
 R1=${1}
 R2=${2}
@@ -66,10 +67,10 @@ while IFS=" " read -r key val; do
   fi
 done <"$rnadb_config"
 
-if [ ${RNADB}x == x ]; then 
+if [ ${RNADB}x == x ]; then
    echo "No $RNADB_KEY found in RNA database config file $RNADB_CONFIG"
    exit 1
-else 
+else
    echo "Using RNADB of $RNADB"
 fi
 
@@ -105,20 +106,41 @@ echo R1 is $R1
 if [ $paired == 1 ]; then
     array=(${R2//_/ })
     SAMPLE_ID2=${array[0]}_${array[1]}
-    
+
     if [ ${SAMPLE_ID} != ${SAMPLE_ID2} ]; then
         echo "readfile convetion not followed: Must start with the same two integers separated by _ "
         exit -1
     fi
-    
+
     if [[ $R2 =~  $GZ_SUFFIX ]]; then
        R2=${R2::-3}
-       gunzip -c ${R2}.gz > $R2 
+       gunzip -c ${R2}.gz > $R2
     fi
     echo R2 is $R2
 fi
 
-# trim if we are told to 
+#run fastqc on untrimmed database
+if [ $paired == 1]; then
+    echo ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${R1} ${R2}
+    ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${R1} ${R2}
+else
+    echo ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${R1}
+    ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${R1}
+fi
+
+
+#unzip report and print summary to stdout
+if [ $paired == 1]; then
+    unzip ${R1}_fastqc.zip
+    cat ${R1}_fastqc/summary.txt
+    unzip ${R2}_fastqc.zip
+    cat ${R2}_fastqc/summary.txt
+  else
+    unzip ${R1}_fastqc.zip
+    cat ${R1}_fastqc/summary.txt
+fi
+
+# trim if we are told to
 
 if [ $TRIM == 1 ]; then
     if [ $paired == 1 ]; then
@@ -134,8 +156,17 @@ if [ $TRIM == 1 ]; then
        echo SORT_FILE=${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq
        SORT_FILE=${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq
     fi
-else 
-  echo "Skipping TRIMOMATIC step based on users request"
+else
+    echo "Skipping TRIMOMATIC step based on users request"
+    #adding logic for $TRIM = 0, $SORT = 1 condition
+    if [ $paired == 1 ]; then
+      echo ${SORTMERNA_DIR}/scripts/merge-paired-reads.sh $R1 $R2 ${SAMPLE_ID}_${CELL_ID}_merged-reads.fastq
+      ${SORTMERNA_DIR}/scripts/merge-paired-reads.sh $R1 $R2 ${SAMPLE_ID}_${CELL_ID}_merged-reads.fastq
+      echo SORT_FILE=${SAMPLE_ID}_${CELL_ID}_merged-reads.fastq
+      SORT_FILE=${SAMPLE_ID}_${CELL_ID}_merged-reads.fastq
+    else
+      echo SORT_FILE=$R1
+      SORT_FILE=$R1
 fi
 
 # sort if we are told to
@@ -148,21 +179,73 @@ if [ $SORT == 1 ]; then
         echo ${SORTMERNA_DIR}/scripts/unmerge-paired-reads.sh ${SAMPLE_ID}_${CELL_ID}_rna_free_reads.fastq ${SAMPLE_ID}_R1_${CELL_ID}_rna_free_reads.fastq ${SAMPLE_ID}_R2_${CELL_ID}_rna_free_reads.fastq
         ${SORTMERNA_DIR}/scripts/unmerge-paired-reads.sh ${SAMPLE_ID}_${CELL_ID}_rna_free_reads.fastq ${SAMPLE_ID}_R1_${CELL_ID}_rna_free_reads.fastq ${SAMPLE_ID}_R2_${CELL_ID}_rna_free_reads.fastq
     fi
-else 
+else
   echo "Skipping SORTMERNA step based on users request"
 fi
 
-# gzip the trimmed inputs 
+# gzip the trimmed inputs
 
 if [ $TRIM == 1 ]; then
     if [ $paired == 1 ]; then
         gzip ${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq &
         gzip ${SAMPLE_ID}_R2_${CELL_ID}_paired.fastq &
         wait
-    else 
+    else
         gzip ${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq &
     fi
     echo done with all gzips
+fi
+
+
+#fastqc on trimmed/sored outputs
+if [ $SORT == 1 ]; then
+    if [ $paired == 1 ]; then
+        echo ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_R1_${CELL_ID}_rna_free_reads.fastq ${SAMPLE_ID}_R2_${CELL_ID}_rna_free_reads.fastq
+        ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_R1_${CELL_ID}_rna_free_reads.fastq ${SAMPLE_ID}_R2_${CELL_ID}_rna_free_reads.fastq
+    else
+        echo ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_${CELL_ID}_rna_free_reads.fastq
+        ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_${CELL_ID}_rna_free_reads.fastq
+    fi
+else
+    if [ $TRIM == 1 ]; then
+        if [ $paired == 1 ]; then
+            echo ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq ${SAMPLE_ID}_R2_${CELL_ID}_paired.fastq
+            ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq ${SAMPLE_ID}_R2_${CELL_ID}_paired.fastq
+        else
+            echo ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq
+            ${FASTQC_DIR}/fastqc -t ${NTHREADS} ${SAMPLE_ID}_R1_${CELL_ID}_paired.fastq
+        fi
+    else
+      echo No need to re-run fastqc, reads were not trimmed or sorted
+    fi
+fi
+
+
+#unzip and report trimmed/sorted fastqc summaries
+if [ $SORT == 1 ]; then
+    if [ $paired == 1]; then
+        unzip ${SAMPLE_ID}_R1_${CELL_ID}_rna_free_reads_fastqc.zip
+        cat ${SAMPLE_ID}_R1_${CELL_ID}_rna_free_reads_fastqc/summary.txt
+        unzip ${SAMPLE_ID}_R2_${CELL_ID}_rna_free_reads_fastqc.zip
+        cat ${SAMPLE_ID}_R2_${CELL_ID}_rna_free_reads_fastqc/summary.txt
+    else
+        unzip ${SAMPLE_ID}_${CELL_ID}_rna_free_reads_fastqc.zip
+        cat ${SAMPLE_ID}_${CELL_ID}_rna_free_reads_fastqc/summary.txt
+    fi
+else
+    if [ $TRIM == 1 ]; then
+        if [ $paired == 1 ]; then
+            unzip ${SAMPLE_ID}_R1_${CELL_ID}_paired_fastqc.zip
+            cat ${SAMPLE_ID}_R1_${CELL_ID}_paired_fastqc/summary.txt
+            unzip ${SAMPLE_ID}_R2_${CELL_ID}_paired_fastqc.zip
+            cat ${SAMPLE_ID}_R2_${CELL_ID}_paired_fastqc/summary.txt
+        else
+            unzip ${SAMPLE_ID}_R1_${CELL_ID}_paired_fastqc.zip
+            cat ${SAMPLE_ID}_R1_${CELL_ID}_paired_fastqc/summary.txt
+        fi
+    else
+      echo No new fastq summaries, reads were not trimmed or sorted
+    fi
 fi
 
 
@@ -177,9 +260,8 @@ fi
 rm ${SAMPLE_ID}_${CELL_ID}_merged.fastq
 rm ${SAMPLE_ID}_${CELL_ID}_merged.blast
 rm ${SAMPLE_ID}_${CELL_ID}_merged-reads.fastq
-rm *unpaired.fastq 
+rm *unpaired.fastq
 rm *log
 rm $R1
 rm $R2
 rm -r $RNADB_DIR
-
