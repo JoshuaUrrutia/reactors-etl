@@ -5,7 +5,7 @@ set -e
 set +x
 # this is where we mount the binary directories
 
-FASTQC_DIR=/opt/fastqc-0.11.6/
+FASTQC_DIR=/opt/FastQC/
 SORTMERNA_DIR=/opt/sortmerna-2.1b/
 TRIMMOMATIC_DIR=/opt/Trimmomatic-0.36/
 RNADB_CONFIG="config"
